@@ -47,12 +47,19 @@ func RunSimulation(input *pb.SimulationInput) *pb.SimulationResult {
 		return -1
 	}
 
+	abs := func(v int64) int64 {
+		if v < 0 { return -v }
+		return v
+	}
+
 	for {
 		found := false
 		bestIdx := -1
 		bestDist := int64(math.MaxInt64)
 
-		for step := 1; step <= 7; step++ {
+		// Scan all eight directions, starting from the next clockwise after incoming,
+		// and including the incoming direction as the last candidate.
+		for step := 1; step <= 8; step++ {
 			scanDir := (dir + step) & 7
 
 			bestIdx = -1
@@ -69,7 +76,9 @@ func RunSimulation(input *pb.SimulationInput) *pb.SimulationResult {
 
 				dx := xs[i] - xs[cur]
 				dy := ys[i] - ys[cur]
-				dist := dx*dx + dy*dy
+				// Chebyshev distance along axis/diagonal rays
+				dist := abs(dx)
+				if ady := abs(dy); ady > dist { dist = ady }
 
 				if dist < bestDist {
 					bestDist = dist

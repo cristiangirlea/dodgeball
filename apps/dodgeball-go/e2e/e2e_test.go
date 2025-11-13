@@ -3,14 +3,8 @@
 package e2e
 
 import (
-	"bufio"
 	"context"
 	"net"
-	"os"
-	"path/filepath"
-	"runtime"
-	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -20,36 +14,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 )
 
-func dirStrToCode(s string) int32 {
-	s = strings.ToUpper(strings.TrimSpace(s))
-	switch s {
-	case "N":
-		return 0
-	case "NE":
-		return 1
-	case "E":
-		return 2
-	case "SE":
-		return 3
-	case "S":
-		return 4
-	case "SW":
-		return 5
-	case "W":
-		return 6
-	case "NW":
-		return 7
-	default:
-		return 0
-	}
-}
-
-func repoRoot(tb testing.TB) string {
-	_, thisFile, _, _ := runtime.Caller(0)
-	// thisFile = apps/dodgeball-go/e2e/e2e_test.go
-	root := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
-	return root
-}
 
 func startServer(tb testing.TB) (addr string, stop func()) {
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
@@ -77,65 +41,67 @@ func TestGRPCE2E_Samples1And2(t *testing.T) {
 	defer conn.Close()
 	client := pb.NewDodgeballServiceClient(conn)
 
-	root := repoRoot(t)
-	samples := []string{"sample1", "sample2"}
-	for _, name := range samples {
-		inPath := filepath.Join(root, "tests", "samples", name+".in")
-		outPath := filepath.Join(root, "tests", "samples", name+".out")
+	mkPlayers := func(coords ...[2]int64) []*pb.Player {
+		ps := make([]*pb.Player, 0, len(coords))
+		for _, c := range coords {
+			ps = append(ps, &pb.Player{X: c[0], Y: c[1], Alive: true})
+		}
+		return ps
+	}
 
-		inF, err := os.Open(inPath)
+	cases := []struct {
+		name       string
+		in         *pb.SimulationInput
+		wantThrows int32
+		wantLast   int32
+	}{
+		{
+			name: "spec sample1 testcase1",
+			in: &pb.SimulationInput{
+				Players: mkPlayers(
+					[2]int64{-10, -10},
+					[2]int64{-10, 10},
+					[2]int64{0, -10},
+					[2]int64{0, 10},
+					[2]int64{10, -10}, // starting player (index 4 -> 0-based)
+					[2]int64{10, 10},
+					[2]int64{-9, -10},
+					[2]int64{-9, 0},
+				),
+				StartDirection: 7, // NW
+				StartIndex:     4, // player 5 -> 0-based
+			},
+			wantThrows: 4,
+			wantLast:   7, // player 8 -> 0-based
+		},
+		{
+			name: "spec sample1 testcase2",
+			in: &pb.SimulationInput{
+				Players: mkPlayers(
+					[2]int64{-1000000, -1000000},
+					[2]int64{-1000000, 1000000},
+					[2]int64{0, -1000000},
+					[2]int64{0, 1000000},
+					[2]int64{1000000, -1000000},
+					[2]int64{1000000, 1000000},
+					[2]int64{-999999, -1000000},
+					[2]int64{-999999, 0},
+				),
+				StartDirection: 3, // SE
+				StartIndex:     3, // player 4 -> 0-based
+			},
+			wantThrows: 5,
+			wantLast:   5, // player 6 -> 0-based
+		},
+	}
+
+	for _, tc := range cases {
+		res, err := client.RunSimulation(ctx, tc.in)
 		if err != nil {
-			t.Fatalf("open in: %v", err)
+			t.Fatalf("rpc %s: %v", tc.name, err)
 		}
-		outF, err := os.Open(outPath)
-		if err != nil {
-			inF.Close()
-			t.Fatalf("open out: %v", err)
+		if res.GetThrows() != tc.wantThrows || res.GetLastPlayer() != tc.wantLast {
+			t.Fatalf("%s mismatch: got (%d %d), want (%d %d)", tc.name, res.GetThrows(), res.GetLastPlayer()+1, tc.wantThrows, tc.wantLast+1)
 		}
-
-		inSc := bufio.NewScanner(inF)
-		inSc.Split(bufio.ScanWords)
-		outSc := bufio.NewScanner(outF)
-		outSc.Split(bufio.ScanWords)
-
-		next := func(sc *bufio.Scanner) string {
-			if !sc.Scan() {
-				t.Fatalf("unexpected EOF")
-			}
-			return sc.Text()
-		}
-
-		T, _ := strconv.Atoi(next(inSc))
-		for tc := 0; tc < T; tc++ {
-			N, _ := strconv.Atoi(next(inSc))
-			players := make([]*pb.Player, 0, N)
-			for i := 0; i < N; i++ {
-				sx, _ := strconv.ParseInt(next(inSc), 10, 64)
-				sy, _ := strconv.ParseInt(next(inSc), 10, 64)
-				players = append(players, &pb.Player{X: sx, Y: sy, Alive: true})
-			}
-			dirStr := next(inSc)
-			s, _ := strconv.Atoi(next(inSc))
-
-			res, err := client.RunSimulation(ctx, &pb.SimulationInput{
-				Players:        players,
-				StartDirection: dirStrToCode(dirStr),
-				StartIndex:     int32(s - 1),
-			})
-			if err != nil {
-				inF.Close(); outF.Close()
-				t.Fatalf("rpc: %v", err)
-			}
-
-			exThrows, _ := strconv.Atoi(next(outSc))
-			exLast, _ := strconv.Atoi(next(outSc))
-
-			if int32(exThrows) != res.GetThrows() || int32(exLast-1) != res.GetLastPlayer() {
-				inF.Close(); outF.Close()
-				t.Fatalf("%s tc%d mismatch: got (%d %d), want (%d %d)", name, tc+1, res.GetThrows(), res.GetLastPlayer()+1, exThrows, exLast)
-			}
-		}
-
-		inF.Close(); outF.Close()
 	}
 }

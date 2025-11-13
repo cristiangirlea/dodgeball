@@ -99,3 +99,113 @@ func TestSample2(t *testing.T) {
 		}
 	}
 }
+
+
+func TestRunSimulation_ExactIO(t *testing.T) {
+	// This test constructs typed SimulationInput objects and asserts the exact
+	// numeric fields of SimulationResult. It is the source of truth for the
+	// simulation I/O contract in unit tests (no file parsing involved).
+	mkPlayers := func(coords ...[2]int64) []*pb.Player {
+		ps := make([]*pb.Player, 0, len(coords))
+		for _, c := range coords {
+			ps = append(ps, &pb.Player{X: c[0], Y: c[1], Alive: true})
+		}
+		return ps
+	}
+
+	cases := []struct {
+		name       string
+		in         *pb.SimulationInput
+		wantThrows int32
+		wantLast   int32
+	}{
+		{
+			name: "single player no throws",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}),
+				StartDirection: 0, // N
+				StartIndex:     0,
+			},
+			wantThrows: 0,
+			wantLast:   0,
+		},
+		{
+			name: "two players aligned with startDir -> will throw after checking all, including incoming dir",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}, [2]int64{1, 0}), // target due East
+				StartDirection: 2,                                        // E (current dir is checked last)
+				StartIndex:     0,
+			},
+			wantThrows: 1,
+			wantLast:   1,
+		},
+		{
+			name: "two players east with startDir north -> one throw to east",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}, [2]int64{2, 0}), // target to the East
+				StartDirection: 0,                                        // N
+				StartIndex:     0,
+			},
+			wantThrows: 1,
+			wantLast:   1,
+		},
+		{
+			name: "chain two throws across three players on a line east",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}, [2]int64{1, 0}, [2]int64{2, 0}),
+				StartDirection: 0, // N; scan finds E, then next dir becomes W, then finds E to player2
+				StartIndex:     0,
+			},
+			wantThrows: 2,
+			wantLast:   2,
+		},
+		{
+			name: "no reachable direction",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}, [2]int64{1, 2}), // not aligned N,NE,E,SE,S,SW,W,NW
+				StartDirection: 0,
+				StartIndex:     0,
+			},
+			wantThrows: 0,
+			wantLast:   0,
+		},
+		{
+			name: "diagonal NE target found when scanning from N",
+			in: &pb.SimulationInput{
+				Players:        mkPlayers([2]int64{0, 0}, [2]int64{2, 2}), // NE
+				StartDirection: 0,                                        // N; scanDir=1 (NE) will match
+				StartIndex:     0,
+			},
+			wantThrows: 1,
+			wantLast:   1,
+		},
+		{
+			name: "spec sample1 testcase1",
+			in: &pb.SimulationInput{
+				Players: mkPlayers(
+					[2]int64{-10, -10},
+					[2]int64{-10, 10},
+					[2]int64{0, -10},
+					[2]int64{0, 10},
+					[2]int64{10, -10}, // starting player (index 4 -> 0-based)
+					[2]int64{10, 10},
+					[2]int64{-9, -10},
+					[2]int64{-9, 0},
+				),
+				StartDirection: 7, // NW incoming
+				StartIndex:     4, // player 5 (0-based 4)
+			},
+			wantThrows: 4,
+			wantLast:   7, // player 8 (0-based 7)
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := RunSimulation(tc.in)
+			if got.Throws != tc.wantThrows || got.LastPlayer != tc.wantLast {
+				t.Fatalf("%s: got {throws=%d, last=%d}, want {throws=%d, last=%d}", tc.name, got.Throws, got.LastPlayer, tc.wantThrows, tc.wantLast)
+			}
+		})
+	}
+}
