@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package dodgeball;
+
+option go_package = "dodgeball-go/proto_gen;dodgeballpb";
+
+service DodgeballService {
+  rpc RunSimulation (SimulationInput) returns (SimulationResult);
+}
+
+message Player {
+  int64 x = 1;
+  int64 y = 2;
+  bool alive = 3;
+}
+
+message SimulationInput {
+  repeated Player players = 1;
+  int32 start_direction = 2;
+  int32 start_index = 3;
+}
+
+message SimulationResult {
+  int32 throws = 1;
+  int32 last_player = 2;
+}
