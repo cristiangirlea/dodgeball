@@ -1,7 +1,7 @@
 import express, { Request, Response } from "express";
 import multer, { Multer } from "multer";
 import { runSimulationTS } from "./client";
-import { parseInput } from "./parser";
+import { autoParseInputs } from "./parser";
 
 const app = express();
 const upload: Multer = multer({ storage: multer.memoryStorage() });
@@ -19,13 +19,18 @@ app.post(
 
             const text = req.file.buffer.toString("utf8");
 
-            const parsed = parseInput(text);
+            // Supports both text (with optional leading T and multiple cases)
+            // and JSON (single object or array) inputs.
+            const inputs = autoParseInputs(text);
 
-            const result = await runSimulationTS(parsed);
+            const lines: string[] = [];
+            for (const input of inputs) {
+                const result = await runSimulationTS(input);
+                // Output format (match sample .out): throws and 1-based last player index
+                lines.push(`${result.throws} ${result.lastPlayer + 1}`);
+            }
 
-            // Output format
-            const out = `${result.throws} ${result.lastPlayer}`;
-
+            const out = lines.join("\n");
             return res.type("text/plain").send(out);
 
         } catch (err: any) {

@@ -20,5 +20,14 @@ export async function runSimulationTS(
 
     const client = new DodgeballServiceClientImpl(transport);
 
+    if (process.env.NODE_ENV === "development") {
+        try {
+            console.debug(`[gRPC] → dodgeball.DodgeballService.RunSimulation @ ${address}`);
+            console.debug(`[gRPC] → request JSON:`, input);
+        } catch {
+            // best-effort logging only
+        }
+    }
+
     return client.RunSimulation(input);
 }
